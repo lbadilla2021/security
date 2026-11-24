@@ -1,0 +1,102 @@
+# Consola de pruebas de seguridad de la red interna.
+#
+# Acceso SOLO por túnel SSH (ver README.md):
+#   ssh -N -L 9510:127.0.0.1:9510 root@<servidor>   →   http://localhost:9510
+#
+# Dos contenedores con la misma imagen:
+#   web   → la página. Publicada únicamente en 127.0.0.1 del host y en una red
+#           propia (security-ui) donde no hay ningún otro contenedor.
+#   probe → el que llega a la red interna. Está en las redes de las apps pero
+#           NO abre ningún puerto TCP: escucha en un socket Unix dentro de un
+#           volumen que solo comparte con web. Ningún contenedor vecino puede
+#           conectarse a él.
+
+name: security
+
+x-endurecido: &endurecido
+  image: security-tools:local
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777
+  user: "10001:10001"
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 64
+  mem_limit: 256m
+  cpus: 0.5
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  probe:
+    <<: *endurecido
+    build: ./app
+    container_name: security-probe
+    command: ["uvicorn", "probe.main:app", "--uds", "/run/probe/probe.sock",
+              "--no-server-header", "--log-level", "warning"]
+    environment:
+      # true permite apuntar al gateway de cada red (= el propio host).
+      PERMITIR_GATEWAY: "false"
+    volumes:
+      - probe-sock:/run/probe
+    networks:
+      - payroll_saas-net
+      - nocobase-network
+      - apex-internal
+      - automatiza-network
+      - prospeccion-net
+      - site-halcon_default
+      # Fuera a propósito (agregar solo si se van a probar):
+      # - alerting               (interna: alertmanager, falcosidekick, escáneres)
+      # - seguridad_default      (Falco)
+      # - backup-offsite_default (Duplicati)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket;s=socket.socket(socket.AF_UNIX);s.connect('/run/probe/probe.sock')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  web:
+    <<: *endurecido
+    container_name: security-web
+    command: ["uvicorn", "web.main:app", "--host", "0.0.0.0", "--port", "8000",
+              "--no-server-header", "--no-proxy-headers"]
+    ports:
+      - "127.0.0.1:9510:8000"   # SOLO loopback del host. Nunca cambiar a 0.0.0.0.
+    volumes:
+      - ./data:/data
+      - probe-sock:/run/probe
+    networks:
+      - ui
+    depends_on:
+      probe:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u;u.urlopen(u.Request('http://127.0.0.1:8000/salud',headers={'Host':'localhost'}),timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  probe-sock:
+
+networks:
+  ui:
+    name: security-ui
+  payroll_saas-net:
+    external: true
+  nocobase-network:
+    external: true
+  apex-internal:
+    external: true
+  automatiza-network:
+    external: true
+  prospeccion-net:
+    external: true
+  site-halcon_default:
+    external: true

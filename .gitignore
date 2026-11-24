@@ -1,0 +1,11 @@
+# Datos de ejecución: inventario de contenedores, resultados de pruebas y
+# conexiones guardadas. Describen la red real del servidor: nunca al repo.
+data/
+
+# Python
+__pycache__/
+*.pyc
+
+# Secretos locales
+.env
+.env.*

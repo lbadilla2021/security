@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Pruebas de red interna</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="barra">
+    <div class="marca">
+      <span class="logo" aria-hidden="true">◈</span>
+      <div>
+        <h1>Pruebas de red interna</h1>
+        <p class="sub">Consola local · solo por túnel SSH</p>
+      </div>
+    </div>
+    <div id="estado-probe" class="pildora pildora-neutra" role="status">Conectando…</div>
+  </header>
+
+  <div class="disposicion">
+    <nav class="menu" aria-label="Secciones">
+      <details class="grupo" data-grupo="general" open>
+        <summary><span class="grupo-nombre">General</span></summary>
+        <div class="grupo-items">
+          <a href="#/conexiones" data-ruta="conexiones">Conexiones</a>
+          <a href="#/red" data-ruta="red">Red e inventario</a>
+        </div>
+      </details>
+
+      <div class="menu-seccion">
+        <p class="menu-titulo">Pruebas generales</p>
+        <div class="filtro-niveles" id="filtro-niveles" role="group" aria-label="Filtrar por nivel"></div>
+        <div class="menu-herramientas">
+          <button type="button" class="enlace" data-accion="expandir">Expandir todo</button>
+          <button type="button" class="enlace" data-accion="contraer">Contraer todo</button>
+        </div>
+      </div>
+      <div id="menu-tipos"></div>
+
+      <div class="menu-seccion">
+        <p class="menu-titulo">Pruebas por aplicación</p>
+        <p class="menu-nota">Específicas de un sistema concreto.</p>
+      </div>
+      <div id="menu-apps"></div>
+    </nav>
+
+    <main id="vista" tabindex="-1"></main>
+  </div>
+
+  <!-- Plantillas -->
+  <template id="tpl-conexiones">
+    <section class="encabezado">
+      <div>
+        <h2>Conexiones</h2>
+        <p class="muted">Destinos dentro de las redes internas a los que apuntarán las pruebas.</p>
+      </div>
+      <div class="acciones acciones-encabezado">
+        <button type="button" class="btn" data-accion="importar" title="Escanea los contenedores del inventario y crea una conexión por cada puerto abierto que aún no exista">Importar desde inventario</button>
+        <button type="button" class="btn btn-primario" data-accion="nueva">+ Nueva conexión</button>
+      </div>
+    </section>
+
+    <section class="tarjeta oculto" id="panel-form">
+      <h3 id="form-titulo">Nueva conexión</h3>
+      <form id="form-conexion" novalidate>
+        <div class="rejilla">
+          <label>Nombre
+            <input name="nombre" required maxlength="80" placeholder="Backend de nómina">
+          </label>
+          <label>Red
+            <select name="red"><option value="">— cualquiera —</option></select>
+          </label>
+          <label>Host (contenedor o IP)
+            <input name="host" required maxlength="253" list="lista-hosts" placeholder="payroll-backend-1" autocomplete="off" spellcheck="false">
+            <datalist id="lista-hosts"></datalist>
+          </label>
+          <label>Puerto
+            <input name="puerto" type="number" min="1" max="65535" required placeholder="8000">
+          </label>
+          <label>Protocolo
+            <select name="protocolo">
+              <option value="tcp">TCP</option>
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+              <option value="postgres">PostgreSQL</option>
+              <option value="redis">Redis</option>
+              <option value="minio">MinIO / S3</option>
+              <option value="otro">Otro</option>
+            </select>
+          </label>
+          <label class="ancho">Notas
+            <textarea name="notas" maxlength="500" rows="2" placeholder="Qué se espera encontrar, alcance acordado…"></textarea>
+          </label>
+        </div>
+        <fieldset>
+          <legend>Tipos de prueba aplicables <span class="muted pequeño">(según el protocolo elegido)</span></legend>
+          <div id="form-tipos" class="form-grupos"></div>
+        </fieldset>
+        <div id="form-resultado" class="resultado oculto" role="status"></div>
+        <div class="acciones">
+          <button type="button" class="btn" data-accion="cancelar">Cancelar</button>
+          <button type="button" class="btn" data-accion="probar-form">Probar conexión</button>
+          <button type="submit" class="btn btn-primario">Guardar</button>
+        </div>
+      </form>
+    </section>
+
+    <div class="barra-filtro">
+      <input type="search" id="filtro-conexiones" placeholder="Filtrar por nombre, host, red o protocolo…" aria-label="Filtrar conexiones" autocomplete="off" spellcheck="false">
+      <span class="muted pequeño" id="cuenta-conexiones"></span>
+    </div>
+    <section class="tarjeta sin-relleno">
+      <div class="tabla-envoltura">
+        <table>
+          <thead>
+            <tr><th>Nombre</th><th>Destino</th><th>Red</th><th>Pruebas</th><th>Estado</th><th class="der">Acciones</th></tr>
+          </thead>
+          <tbody id="tabla-conexiones"></tbody>
+        </table>
+      </div>
+      <p id="sin-conexiones" class="vacio oculto">Aún no hay conexiones. Crea una o impórtala desde <a href="#/red">Red e inventario</a>.</p>
+    </section>
+  </template>
+
+  <template id="tpl-red">
+    <section class="encabezado">
+      <div>
+        <h2>Red e inventario</h2>
+        <p class="muted">Redes a las que está unido el probe y contenedores conocidos en cada una.</p>
+      </div>
+    </section>
+    <section class="tarjeta">
+      <h3>Interfaces del probe</h3>
+      <p class="muted pequeño">El probe solo se conecta a IPs dentro de estas subredes. Internet, loopback y el gateway (el host) quedan fuera de alcance.</p>
+      <div class="tabla-envoltura">
+        <table>
+          <thead><tr><th>Red</th><th>Interfaz</th><th>IP del probe</th><th>Subred</th><th>Gateway (bloqueado)</th></tr></thead>
+          <tbody id="tabla-interfaces"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="tarjeta">
+      <h3>Inventario</h3>
+      <p class="muted pequeño" id="inv-fecha"></p>
+      <div id="inventario"></div>
+    </section>
+  </template>
+
+  <template id="tpl-tipo">
+    <p class="miga" data-campo="grupo"></p>
+    <section class="encabezado">
+      <div>
+        <h2 data-campo="nombre"></h2>
+        <p class="muted" data-campo="descripcion"></p>
+      </div>
+      <div class="pildoras">
+        <span data-campo="nivel"></span>
+        <span data-campo="estado" class="pildora pildora-neutra">Por implementar</span>
+      </div>
+    </section>
+    <div class="advertencia oculto" data-campo="intrusivo" role="note">
+      <strong>Prueba intrusiva.</strong> Puede modificar datos, gatillar bloqueos del WAF o degradar el servicio.
+      Pedirá confirmación al ejecutarse; conviene correrla contra el tenant Demo o una copia, no contra clientes.
+    </div>
+    <section class="tarjeta guia oculto" data-campo="seccion-guia">
+      <h3>Cómo usar esta prueba</h3>
+      <p data-campo="guia-intro" class="guia-intro"></p>
+      <ol data-campo="guia-pasos" class="guia-pasos"></ol>
+      <h4 data-campo="guia-lectura-titulo">Cómo leer el resultado</h4>
+      <ul data-campo="guia-lectura" class="lista"></ul>
+    </section>
+    <section class="tarjeta oculto" data-campo="seccion-parametros">
+      <h3>Parámetros</h3>
+      <div class="rejilla" data-campo="parametros"></div>
+    </section>
+    <section class="tarjeta">
+      <h3>Qué revisará</h3>
+      <ul data-campo="verifica" class="lista"></ul>
+      <p class="muted pequeño" data-campo="alcance"></p>
+    </section>
+    <section class="tarjeta">
+      <h3 data-campo="titulo-objetivo">Conexiones asignadas</h3>
+      <p class="muted pequeño" data-campo="ayuda-objetivo"></p>
+      <div data-campo="conexiones" class="lista-check"></div>
+      <div class="recoleccion oculto" data-campo="recoleccion">
+        <strong>Recolección en el host.</strong> Esta prueba analiza datos que junta el servidor (el contenedor no
+        tiene acceso a Docker). Antes de analizar, ejecuta en el servidor:
+        <code class="bloque-codigo" data-campo="comando"></code>
+      </div>
+      <div class="acciones">
+        <span class="muted pequeño" data-campo="progreso" role="status"></span>
+        <button type="button" class="btn btn-primario" data-accion="ejecutar" data-campo="boton" disabled
+                title="La ejecución se implementará más adelante">Ejecutar prueba</button>
+      </div>
+    </section>
+
+    <section data-campo="seccion-resultados" class="oculto">
+      <div class="encabezado encabezado-chico">
+        <h3>Resultados</h3>
+        <label class="selector-historial">Ejecución
+          <select data-campo="historial"></select>
+        </label>
+      </div>
+      <div data-campo="resultado"></div>
+    </section>
+  </template>
+
+  <div id="aviso" class="aviso oculto" role="alert"></div>
+</body>
+</html>
